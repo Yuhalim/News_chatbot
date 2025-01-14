@@ -1,49 +1,59 @@
-import time
-import requests
-from transformers import pipeline
-from apscheduler.schedulers.background import BackgroundScheduler
-from gtts import gTTS
-import pygame
-import tempfile
 import cv2
 import speech_recognition as sr
+import requests
+from gtts import gTTS
+from transformers import pipeline
+from apscheduler.schedulers.background import BackgroundScheduler
+import pygame
+import tempfile
+import time
 import threading 
 import keyboard
+from bs4 import BeautifulSoup
 
 
-NEWS_API_KEY = '9bee8e3e891b4821a5e3e5236aea7efa'
-NEWS_BASE_URL = "https://newsapi.org/v2/top-headlines"
-DEFAULT_COUNTRY = "us"
-
+# NEWS_API_KEY = '61e9b5469a6406a3943f1ef452278eae'
+# NEWS_BASE_URL = "http://api.mediastack.com/v1/news"
+# DEFAULT_COUNTRY = "ng"
 
 pygame.mixer.init()
+
 stop_flag = threading.Event()
+
 recognizer = sr.Recognizer()
+
 # Initialize summarizer (adjust for GPU or CPU)
 summarizer = pipeline("summarization", model="facebook/bart-large-cnn", device=-1)
 
 
-def fetch_news(country=DEFAULT_COUNTRY, limit=5):
-    """Fetch news articles from the News API."""
+def fetch_news_from_web(limit=10):
+    """Scrape news articles from a reliable news website."""
+    url = "https://www.nairaland.com/news"  # Example: Pulse Nigeria's news section
     articles = []
-    page = 1
-    while len(articles) < limit:
 
-        params = {"country": country, "apiKey": NEWS_API_KEY, "page": page, "pageSize": 100}
-        response = requests.get(NEWS_BASE_URL, params=params)
+    try:
+        response = requests.get(url)
         if response.status_code == 200:
-            new_articles = response.json().get("articles", [])
-            if not new_articles:
-                break
-            articles.extend(new_articles)
-            page += 1
+            soup = BeautifulSoup(response.text, "html.parser")
+
+            # Find news headlines and descriptions (adjust selectors based on the website structure)
+            headlines = soup.find_all("h2", class_="headline", limit=limit)  # Adjust class name
+            descriptions = soup.find_all("p", class_="description", limit=limit)  # Adjust class name
+
+            for i, headline in enumerate(headlines):
+                title = headline.text.strip()
+                description = descriptions[i].text.strip() if i < len(descriptions) else "No description available."
+                articles.append({"title": title, "description": description})
+
         else:
-            print(f"Error fetching news: {response.status_code}")
-            break
-    return articles[:limit]
+            print(f"Error fetching news: HTTP {response.status_code}")
+    except Exception as e:
+        print(f"Error scraping news: {e}")
+
+    return articles
 
 def summarize_news(article):
-    """Summarize a news article."""
+    #Summarize a news article.
     try:
         if len(article) < 50:
             return article
@@ -61,7 +71,6 @@ def summarize_news(article):
         return "Could not summarize the article."
 
 def recognize_speech(timeout=15):
-    """Recognize speech input with improved handling."""
     with sr.Microphone() as source:
         recognizer.adjust_for_ambient_noise(source, duration=2)
         try:
@@ -72,7 +81,7 @@ def recognize_speech(timeout=15):
                 best_match = result["alternative"][0]["transcript"].lower()
                 confidence = result["alternative"][0]["confidence"]
                 print(f"Recognized: {best_match} (Confidence: {confidence})")
-                if confidence > 0.8:
+                if confidence > 0.5:
                     return best_match
             return "unrecognized"
         except sr.UnknownValueError:
@@ -89,7 +98,7 @@ def recognize_speech(timeout=15):
 def speak_text(text):
     """Convert text to speech and play it with interruption support."""
     global stop_flag
-    stop_flag.clear()  # Reset the stop flag
+    stop_flag.clear() 
 
     try:
         tts = gTTS(text=text, lang='en')
@@ -100,7 +109,7 @@ def speak_text(text):
         pygame.mixer.music.load(audio_path)
         pygame.mixer.music.play()
 
-        # Monitor for the stop flag during playback
+        # Monitor for the stop command 
         while pygame.mixer.music.get_busy():
             if stop_flag.is_set():  # If stop command detected
                 pygame.mixer.music.stop()
@@ -125,7 +134,7 @@ def recognize_stop_command():
 def process_news():
     """Fetch, summarize, and present news to the user with interruption support."""
     speak_text("Fetching latest headlines... please wait")
-    articles = fetch_news()
+    articles = fetch_news_from_web()
     if not articles:
         print("No news available.")
         speak_text("Sorry, no news is available right now.")
@@ -135,7 +144,7 @@ def process_news():
         if stop_flag.is_set():
             print("User requested to stop. Returning to detection mode.")
             speak_text("Okay, stopping the news update.")
-            time.sleep(5)  # Wait before returning to detection
+            time.sleep(5) 
             return
 
         title = article.get("title", "No Title Available")
@@ -150,7 +159,7 @@ def process_news():
         speak_text(f"Headline: {title}")
 
         if stop_flag.is_set():
-            return  # Stop if the flag is set
+            return  
 
         # Speak the summary
         summary = summarize_news(description)
@@ -195,7 +204,7 @@ def camera_detection():
             print("Human face detected! Starting interaction...")
             speak_text("Hello! Would you like to hear the latest news?")
             
-            while True:  # Interaction loop
+            while True: 
                 command = recognize_speech().lower()
                 
                 if "yes" in command:
@@ -206,12 +215,12 @@ def camera_detection():
                     break
                 elif command in ["unrecognized", "error"]:
                     print("I didn't catch that. Please say 'yes' or 'no'.")
-                    speak_text("I didn't catch that. Please say 'yes' or 'no'.")
+                    speak_text("Sorry, didn't get that. Please say 'yes' or 'no'.")
                 else:
                     print("Unrecognized response. Please try again.")
                     speak_text("Unrecognized response. Please try again.")
 
-                # Check if the face is still present during interaction
+                # To Check if the face is still present during interaction
                 ret, frame = cap.read()
                 gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                 faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
@@ -223,7 +232,7 @@ def camera_detection():
         else:
             print("No face detected. Monitoring...")
             # speak_text("No face detected. Waiting for a user.")
-            time.sleep(1)  # Add a delay to reduce CPU usage
+            time.sleep(1) 
 
         # Show the frame with bounding boxes around detected faces
         for (x, y, w, h) in faces:
@@ -232,7 +241,7 @@ def camera_detection():
         cv2.imshow("Camera Feed", frame)
 
         key = cv2.waitKey(1)
-        if key == ord("q"):  # Exit the program when 'q' is pressed
+        if key == ord("q"):  
             print("Exiting the system.")
             speak_text("Goodbye! Have a great day.")
             break
